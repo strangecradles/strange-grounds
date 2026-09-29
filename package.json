@@ -2,6 +2,7 @@
   "name": "strange-grounds",
   "version": "0.1.0",
   "private": true,
+  "homepage": "https://strange-ground.vercel.app",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
