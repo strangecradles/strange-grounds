@@ -1,141 +1,60 @@
 # Strange Grounds
 
-Backcountry conditions intelligence platform. Point at a route on a map, and get an AI-synthesized briefing backed by real-time environmental data — satellite imagery, weather forecasts, snowpack, streamflow, avalanche conditions, and fire activity.
+Point at a route — the Teton Crest Trail, a ski line, a GPX file from the trip you bailed on last year — and get back one briefing: what the snowpack is doing, whether that stream crossing is going to be a problem, if there's a fire anywhere near your exit, and a green/yellow/red call on the whole thing.
 
-<!-- TODO: Add screenshot here -->
-<!-- ![Strange Grounds briefing screenshot](docs/screenshot.png) -->
+**Live at [strange-ground.vercel.app](https://strange-ground.vercel.app)** — free, no account needed for your first briefing.
 
-## What It Does
+![Strange Grounds with the Teton Crest Trail loaded — route stats, season info, and elevation profile](docs/screenshot.png)
 
-1. **Plan a trip** — draw a route on the map or select a popular backcountry route
-2. **Generate a briefing** — the system fetches data from 8+ environmental sources along your route
-3. **Read conditions** — get a narrative briefing with a green/yellow/red readiness assessment
-4. **Share** — each briefing gets a unique shareable link
-5. **Monitor** — opt-in to email alerts when conditions change before your trip
+## Why this exists
 
-## Data Sources
+Planning a backcountry trip means opening eight tabs: the avalanche forecast, the point forecast, a SNOTEL station that's hopefully near your route, a stream gauge, a fire map, and a satellite image if you're lucky. Then you cross-reference all of it in your head at 11pm.
 
-| Source | What It Provides |
+Strange Grounds does the tab-opening for you. Draw a route on the map (or pick a popular one, or import a GPX/KML), hit **Generate**, and the system fetches conditions from every relevant source along your route in parallel, then has Claude write it up as a narrative briefing with a readiness assessment. Briefings get shareable links, and you can opt into email alerts if conditions shift before you go.
+
+## Where the data comes from
+
+| Source | What it knows |
 |:---|:---|
-| [NWS](https://www.weather.gov/) | Hourly + daily forecasts, alerts, hazards |
-| [SNOTEL](https://www.nrcs.usda.gov/wps/portal/wcc/home/snowClimateMonitoring/snowpack/) | Snowpack depth, SWE, temperature at ~900 stations |
-| [USGS](https://waterdata.usgs.gov/) | Real-time streamflow from gauging stations |
-| [Sentinel-2](https://dataspace.copernicus.eu/) | Satellite imagery — true color, NDSI snow cover, snowline detection |
-| [UAC / CAIC](https://utahavalanchecenter.org/) | Avalanche forecasts and danger ratings by zone |
-| [NIFC](https://www.nifc.gov/) | Active fire perimeters and incidents |
-| [NWS / SunCalc](https://aa.usno.navy.mil/) | Sunrise, sunset, daylight hours |
+| [NWS](https://www.weather.gov/) | Forecasts, alerts, hazards |
+| [SNOTEL](https://www.nrcs.usda.gov/wps/portal/wcc/home/snowClimateMonitoring/snowpack/) | Snowpack depth and SWE at ~900 stations |
+| [USGS](https://waterdata.usgs.gov/) | Real-time streamflow |
+| [Sentinel-2](https://dataspace.copernicus.eu/) | Satellite imagery — true color, snow cover, snowline |
+| [UAC / CAIC](https://utahavalanchecenter.org/) | Avalanche forecasts and danger ratings |
+| [NIFC](https://www.nifc.gov/) | Active fire perimeters |
+| [USNO](https://aa.usno.navy.mil/) | Sunrise, sunset, daylight |
 | [OpenStreetMap](https://www.openstreetmap.org/) | Trail data for route context |
 
-Data is fetched in parallel via [Inngest](https://www.inngest.com/) background functions, cached in Supabase, and synthesized into a narrative by Claude.
+## How it's built
 
-## Architecture
+A Next.js 16 app with a MapLibre GL map talks over tRPC to Supabase (Postgres + PostGIS — routes, stations, and cached conditions live there, behind RLS). When you ask for a briefing, an [Inngest](https://www.inngest.com/) background job fans out to all the data sources in parallel, then hands the results to Claude for synthesis. Satellite imagery comes from the Copernicus Data Space Process API. Deployed on Vercel, watched by Sentry and Plausible, tested with Playwright.
+
+The interesting parts of the codebase:
 
 ```
-┌──────────────────────────────────────────────────────────┐
-│                    Next.js 16 (App Router)                │
-│  MapLibre GL map · tRPC client · React Query · Recharts  │
-└──────────────────────┬───────────────────────────────────┘
-                       │ tRPC
-┌──────────────────────▼───────────────────────────────────┐
-│                     tRPC Server                           │
-│  Routes · Trips · Briefings · Conditions                  │
-└──────────┬────────────────────────────┬──────────────────┘
-           │                            │
-┌──────────▼──────────┐    ┌────────────▼─────────────────┐
-│   Supabase (Postgres │    │     Inngest (Background)     │
-│   + PostGIS + Auth)  │    │  generate-briefing function   │
-│   16 migrations      │    │  parallel data source fetch   │
-│   RLS policies       │    │  LLM synthesis via Claude     │
-└──────────────────────┘    └──────────────────────────────┘
+src/lib/data-sources/   # one adapter per environmental source
+src/lib/synthesis/      # prompt construction + briefing generation
+src/lib/inngest/        # the background job that ties it together
+src/lib/routes/         # route segmentation, GPX parsing
+src/components/map/     # MapLibre map, layers, drawing tools
+supabase/migrations/    # PostGIS, RLS policies, RPCs
 ```
 
-## Tech Stack
+## Run it yourself
 
-- **Frontend:** Next.js 16, React 19, TypeScript, MapLibre GL, Tailwind CSS, Radix UI, Recharts, D3
-- **Backend:** tRPC, Inngest (serverless background jobs), Supabase (Postgres + PostGIS + Auth + Storage)
-- **AI:** Anthropic Claude for briefing synthesis and condition interpretation
-- **Satellite:** Copernicus Data Space Ecosystem (CDSE) Process API for Sentinel-2 imagery
-- **Deployment:** Vercel (frontend + API routes), Supabase (managed Postgres)
-- **Monitoring:** Sentry, Plausible Analytics
-- **Testing:** Playwright (smoke + e2e)
-
-## Setup
-
-### Prerequisites
-
-- Node.js >= 18
-- A [Supabase](https://supabase.com/) project (free tier works)
-- API keys: [Anthropic](https://console.anthropic.com/), [Copernicus CDSE](https://dataspace.copernicus.eu/), [MapTiler](https://www.maptiler.com/)
-
-### 1. Install dependencies
+You'll need Node.js >= 18, a [Supabase](https://supabase.com/) project (free tier works), and API keys from [Anthropic](https://console.anthropic.com/), [Copernicus CDSE](https://dataspace.copernicus.eu/), and [MapTiler](https://www.maptiler.com/).
 
 ```bash
 npm install
-```
-
-### 2. Configure environment
-
-```bash
-cp .env.local.example .env.local
-```
-
-Fill in your Supabase credentials, Anthropic API key, CDSE OAuth credentials, and MapTiler key.
-
-### 3. Apply database migrations
-
-```bash
+cp .env.local.example .env.local   # fill in Supabase, Anthropic, CDSE, MapTiler
 npm run dev
-# In another terminal:
+```
+
+With the dev server running, apply migrations and seed station data:
+
+```bash
 curl -X POST http://localhost:3000/api/setup
+npm run seed   # ~900 SNOTEL stations, USGS gauges, avalanche zones — idempotent
 ```
 
-### 4. Seed station data
-
-```bash
-npm run seed
-```
-
-Downloads ~900 SNOTEL stations, USGS stream gauges for western US states, and avalanche zone boundaries. Idempotent — safe to re-run.
-
-### 5. Start development server
-
-```bash
-npm run dev
-```
-
-## Scripts
-
-| Command | Description |
-|:---|:---|
-| `npm run dev` | Development server |
-| `npm run build` | Production build |
-| `npm run seed` | Seed SNOTEL, USGS, and avalanche zone data |
-| `npm run test` | Run Playwright tests |
-| `npm run test:e2e` | Run briefing end-to-end test |
-| `npm run test:prod` | Smoke test against production URL |
-
-## Project Structure
-
-```
-src/
-├── app/                    # Next.js App Router pages + API routes
-│   ├── (auth)/             # Login, signup
-│   ├── (dashboard)/        # Main app, trip management
-│   ├── briefing/[token]/   # Shareable briefing view
-│   ├── conditions/         # Route conditions pages
-│   └── api/                # tRPC, Inngest, satellite endpoints
-├── components/             # React components
-│   ├── briefing/           # Briefing panel, PDF export, route walkthrough
-│   ├── map/                # MapLibre map, layers, drawing tools
-│   └── routes/             # Route toolbar, popular route detail
-├── lib/
-│   ├── data-sources/       # Adapters for each environmental data source
-│   ├── inngest/            # Background job definitions
-│   ├── routes/             # Route segmentation, GPX parsing, conditions
-│   ├── synthesis/          # LLM prompt construction + briefing generation
-│   ├── supabase/           # DB client + admin client
-│   └── trpc/               # tRPC router definitions
-└── stores/                 # Zustand state management
-supabase/
-└── migrations/             # 16 SQL migrations (PostGIS, RLS, RPCs)
-```
+Other scripts: `npm run build`, `npm run test` (Playwright), `npm run test:e2e` (full briefing flow), `npm run test:prod` (smoke test against production).
